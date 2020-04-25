@@ -1,0 +1,82 @@
+---
+title: "getting-started"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rethinking)
+library(ggplot2)
+library(dplyr)
+
+```
+
+
+
+```{r}
+data("Howell1")
+d <- Howell1
+d2 <- d[d$age>=18,]
+xbar <- mean(d2$weight)
+
+m4_3_flist <- alist(
+  height ~ dnorm(mu, sigma),
+  mu <- a + b*(weight - xbar),
+  a ~ dnorm(178, 20), 
+  b ~ dlnorm(0, 1),
+  sigma ~ dunif(0, 50)
+)
+
+m4_3 <- quap(m4_3_flist, data = d2)
+
+precis(m4_3)
+```
+
+```{r}
+m4_3_post <- extract.samples(m4_3)
+precis(m4_3_post)
+```
+
+```{r}
+# estimates for mu
+link(m4_3) %>% #at the subject level, linear predictor
+  dim()
+```
+
+```{r}
+#estimates for each subject
+sim(m4_3) %>% 
+  dim()
+```
+
+```{r}
+
+
+# prior exploration
+set.seed(2971)
+N <- 100
+a <- rnorm(N, 178, 20)
+b <- rnorm(N, 0, 10)
+weight_seq <- seq(4, 63, length.out = 30)
+
+graph_sim <- function(a, b){
+  sim_df <- purrr::map2_df(a, b, .id = 'ID', ~tibble(
+    weight = weight_seq,
+    height = .x + .y*(weight-45))) 
+  
+  sim_df%>% 
+    ggplot(aes(x = weight, y = height, group = ID)) +
+    geom_line(alpha = .3) +
+    coord_cartesian(xlim = range(d2$weight), ylim =c(0, 272))
+}
+
+
+rlnorm(1e5, 0, 1) %>% sd
+rnorm(1e5, 0, 3) %>%  sd
+
+# it's not really fair to compare dnorm(0,10) and dlnorm(0,1) because the sd are so different
+# i don't think you should force it to positive either
+
+graph_sim(rnorm(N, 178, 20), rnorm(N, 0, 2))
+```
+
