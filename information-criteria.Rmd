@@ -5,7 +5,142 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(rethinking)
+library(dplyr)
+```
+
+```{r}
+sppnames <- c( "afarensis","africanus","habilis","boisei",
+    "rudolfensis","ergaster","sapiens")
+brainvolcc <- c( 438 , 452 , 612, 521, 752, 871, 1350 )
+masskg <- c( 37.0 , 35.5 , 34.5 , 41.5 , 55.5 , 61.0 , 53.5 )
+d <- data.frame( species=sppnames , brain=brainvolcc , mass=masskg )
+
+## R code 7.2
+d$mass_std <- (d$mass - mean(d$mass))/sd(d$mass)
+d$brain_std <- d$brain / max(d$brain)
+
+## R code 7.3
+m7.1 <- quap(
+    alist(
+        brain_std ~ dnorm( mu , exp(log_sigma) ),
+        mu <- a + b*mass_std,
+        a ~ dnorm( 0.5 , 1 ),
+        b ~ dnorm( 0 , 10 ),
+        log_sigma ~ dnorm( 0 , 1 )
+    ), data=d )
+
 ```
 
 
-calculate AIC, WAIC, llpd etc.
+1. Out goal is to estimate divergance. 
+
+$$
+\begin{aligned}
+D_{KL}(p, q) =&  H(p,q) - H(p) \\
+= & -\sum_i{p_ilog(q_i)} - \left( -\sum_i{p_ilog(p_i)}\right) \\
+= &  -\sum_i{p_i(log(q_i) - log(p_i))}
+\end{aligned}
+$$
+where $H(p)$ is information entropy.
+
+However, it's not possible to know what _p_ is so we have to estimate divergence.
+
+# LPPD - log pointwise predictive density
+
+i = subjects
+s = samples
+
+
+
+```{r}
+set.seed(1)
+m71_lppd <- lppd(m7.1, n =1e4)
+m71_lppd
+sum(m71_lppd)
+```
+
+$$
+lppd(y, \Theta) = \sum_i log(\frac{1}{S} \sum_s p(y_i|\Theta))
+$$
+
+```{r}
+
+set.seed(1)
+sim(m7.1, ll = TRUE, n = 1e4) %>% 
+  exp() %>% 
+  colMeans() %>% 
+  log()
+
+# numerically stable?
+set.seed(1)
+sim(m7.1, ll = TRUE, n = 1e4) %>% 
+  apply(., MARGIN = 2, function(i) log_sum_exp(i) - log(length(i)))
+
+```
+
+$$
+lppd_{CV} = \sum_i \frac{1}{S} \sum_s log(Pr(y_i|\theta_{-i,s}))
+$$
+
+```{r}
+LL <- sim(m7.1, ll = TRUE, n = 1e4)
+L <- exp(LL)
+
+lpd_pw <- log(colMeans(L)) #(lppd)
+
+
+
+w <- 1/exp(LL-max(LL))
+# same as 1/(L/max(L))[1:3,1:3]\
+
+w_n <- w/matrix(colMeans(w), nrow(LL), ncol(LL), byrow = T)
+w_r <- pmin(w_n, sqrt(nrow(LL)))
+elpd_loo_pw = log(colMeans(L*w_r)/colMeans(w_r))
+
+p_loo_pw <- lpd_pw - elpd_loo_pw
+PSIS(m7.1, pointwise = TRUE)
+(p_loo_pw)
+
+colMeans(w)
+
+p_y_theta <- exp(sim(m7.1, ll = TRUE, n = 1e4))
+obs_liklihood <- colMeans(p_y_theta)
+
+
+r_theta <- 1/p_y_theta
+r_weight <- colSums(r_theta)
+
+colSums(r_theta* p_y_theta)
+
+
+
+log(colSums(rowMeans(r_theta) * p_y_theta)/r_weight)
+
+```
+
+# WAIC works
+
+```{r}
+set.seed(1)
+LL <- sim(m7.1, ll = TRUE, n = 1e4)
+L <- exp(LL)
+
+lpd_pw <- log(colMeans(L)) #(lppd)
+
+
+penalty_term <- apply(log(L), MARGIN = 2, var)
+# WAIC
+
+waic_pw <- -2*(lpd_pw - penalty_term) #it works!
+
+#SE of waic
+sqrt(length(waic_pw) * var(waic_pw))
+```
+
+```{r}
+set.seed(1)
+
+WAIC(m7.1, pointwise = T)
+```
+
